@@ -1,0 +1,159 @@
+
+---
+title: 'Project: Practical Machine Learning, Prediction '
+author: "Laura Snyder"
+date: "March 31, 2019"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+##Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+##Submission
+The goal of the project is to predict the manner in which group members did the exercise, the "classe" variable in the training set. Description will include: 1) how model was built; 2) cross validation approach; 3) theexpected out of sample error; and 4) rationale for choices. 
+
+##Prepare the Environment and Import the Data
+
+Set working directory and load all anticipated library items for machine learning analysis.
+
+```{r}
+setwd("~/R/Machine Learning/Project")
+
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(rattle)
+library(RColorBrewer)
+library(corrplot)
+library(gbm)
+```
+
+Capture the csv training and testing sets from the URLs provided.
+
+```{r}
+training <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"),header=TRUE)
+testing <- read.csv(url("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"),header=TRUE)
+```
+
+##Explore, Clean and Reduce the Data 
+
+Take a look at the data.
+
+```{r}
+dim(training)
+dim(testing)
+head(training)
+```
+
+The training set is 19,622 rows of observations across 160 variables. The testing set is 20 rows of observactions across 160 variables. The numbers of variables is higher than is needed to build a predictive model. The first 7 columns are removed as they do not contain data that would be included in a predictive model (such as row number, name or time stamp). Further, some of the columns have many NAs. These should be removed to make the building of the model more manageable.
+
+```{r}
+trainingred<- training[, colSums(is.na(training)) == 0]
+testingred <- testing[, colSums(is.na(testing)) == 0]
+trainingred<-trainingred[,-c(1:7)]
+testingred<-testingred[,-c(1:7)]
+```
+```{r}
+dim(trainingred)
+dim(testingred)
+```
+
+The effect is that now the training set is reduced to 86 columns, and the testing set to 53 columns.
+
+The goal of this project is to predict the manner in which exercise is done, as it relates to the "classe" variable in the training set. The training data will be split into 70% training data and 30% validation data (to determine out of sample errors) for the purpose of building the model. The original testing data will be reserved for the later set of 20 questions to test the final model.
+
+##Split the Training Data into Training and Validation Subsets
+
+Splitting the data set into training and validation subsets will allow cross-validation. That is, to say, that a model built with the training data can later be used with the reserved validation data to ensure it performs as expected. A seed will be set to allow reproducibility.
+
+```{r}
+set.seed(1234)
+inTrain <- createDataPartition(trainingred$classe, p = 0.7, list = FALSE)
+trainData <- trainingred[inTrain, ]
+testData <- trainingred[-inTrain, ]
+```
+```{r}
+dim(trainData)
+dim(testData)
+```
+
+The training set for the development of the model is 13,737 rows long, and the testing set for validating the model is 5,885 rows. Still, the possible column predictors can be reduced further. nearZeroVar diagnoses predictors that have one unique value (i.e. are zero variance predictors) or predictors that have very few unique values relative to the number of observations.
+
+ nearZeroVar diagnoses predictors that have one unique value (i.e. are zero variance predictors) or predictors that are have both of the following characteristics: they have very few unique values relative to the number of samples and the ratio of the frequency of the most common value to the frequency of the second most common value is large. This results in bringing down the number of columns to 53 in each set. Three models will be build from the test set and compared; the best model will be used.
+ 
+ ```{r}
+ zeros <- nearZeroVar(trainData)
+ trainData <- trainData[, -zeros]
+testData  <- testData[, -zeros]
+dim(trainData)
+dim(testData)
+```
+
+##Build and Compare Prediction Models
+
+###Classification Tree
+
+Start by building a classification tree. 
+
+```{r}
+set.seed(1234)
+decisionTreeMod1 <- rpart(classe ~ ., data=trainData, method="class")
+fancyRpartPlot(decisionTreeMod1)
+```
+
+Use the model on the test data to see how well it works.
+
+```{r}
+predictTreeMod1 <- predict(decisionTreeMod1, testData, type = "class")
+cm1 <- confusionMatrix(predictTreeMod1, testData$classe)
+cm1
+```
+
+The confustion matrix show a 68.79% accuracy rate. The out of sample error is about 31%. The model does not appear to be very accurate.
+
+###GBM
+
+The next model attempted is Generalized Boosted Model (GBM). This model is also a supervised machine learning method, which basically compounds weak predictors together to form a better overall predictive model. Start with setting the seed, and then training the model. The GBM performs 150 iterations. There were 52 predictors of which 52 had non-zero influence (the 53rd item, classe, is the outcome being predicted and consequently is not used). The created model is then used to predict the outcome with the test data. A confusion matrix summarized the results, showing a 96.28% accuracy rate. The out of sample error is about 4%. This appears to be a very accurate model.
+
+
+```{r}
+set.seed(1234)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+modGBM  <- train(classe ~ ., data=trainData, method = "gbm", trControl = controlGBM, verbose = FALSE)
+modGBM$finalModel
+```
+```{r}
+predictGBM <- predict(modGBM, newdata=testData)
+cmGBM <- confusionMatrix(predictGBM, testData$classe)
+cmGBM
+```
+
+###Random Forest
+
+Finally, Random Forest is a supervised machine learning algorithm that builds multiple decision trees, then merges them together for an accurate and stable predicition. Start by training the model with trainControl. 500 trees are built with 27 variables tried at each split. A 56% error rate is found. Using the model to predit the outcome with the test data, the accuracy of the model is 99. 44%. The out of sample error is less than 1%. This suggests a very accurate model.
+
+```{r}
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+modRF <- train(classe ~ ., data=trainData, method="rf", trControl=controlRF)
+modRF$finalModel
+```
+```{r}
+predictRF<- predict(modRF, newdata=testData)
+cmRF <- confusionMatrix(predictRF, testData$classe)
+cmRF
+```
+
+##Choose Model and Run the Test Data
+
+Both the GBM and RF models seems very accurate, so accurate that they could be overfitted. The RF model will be used. An additional drawback is the length of time that it takes to run. Using the RF model, the test data is run to prepare for the 20 question follow up quiz.
+
+
+```{r}
+(predict(modRF, testing))
+```
+ [1] B A B A A E D B A A B C B A E E A B B B
+Levels: A B C D E
